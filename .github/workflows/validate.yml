@@ -1,0 +1,24 @@
+name: Validate Control Center
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: node --check app.js && node --check firebase-config.js
+      - name: Validate JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('projects.seed.json','utf8')); JSON.parse(require('fs').readFileSync('firebase.json','utf8')); console.log('JSON OK')"
+      - name: Check required files
+        run: test -f index.html && test -f styles.css && test -f firestore.rules && test -f .nojekyll
