@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <section id="boot" class="screen center"><div class="card login-card"><div class="brand">LPS</div><h1>Control Center</h1><p>Validando acesso...</p></div></section>
+  <section id="boot" class="screen center"><div class="card login-card"><div class="brand">LPS</div><h1>Control Center</h1><p id="bootStatus">Validando acesso...</p></div></section>
 
   <section id="login" class="screen center hidden">
     <div class="card login-card">
@@ -70,6 +70,14 @@
 
   <dialog id="personDialog"><form id="personForm" class="dialog-form wide"><h2>Pessoa e permissões</h2><input id="personOriginal" type="hidden"><div class="two"><label>Nome<input id="personName" required></label><label>E-mail<input id="personEmail" type="email" required></label><label>Empresa<input id="personCompany"></label><label>Perfil<select id="personRole"><option value="viewer">Visualizador</option><option value="operator">Operador</option><option value="planner">Planejamento</option><option value="project_admin">Administrador de obra</option><option value="super_admin">Admin LPS</option></select></label></div><label class="inline"><input id="personActive" type="checkbox" checked> Usuário ativo</label><h3>Permissões por projeto</h3><div id="permissionEditor"></div><div class="actions"><button id="cancelPerson" type="button" class="btn">Cancelar</button><button class="btn primary" type="submit">Salvar permissões</button></div></form></dialog>
 
-  <script type="module" src="./app.js"></script>
+  <script>
+    window.setTimeout(() => {
+      if (!window.__LPS_CONTROL_CENTER_BOOTED__) {
+        const status = document.getElementById('bootStatus');
+        if (status) status.textContent = 'Falha ao carregar o módulo de autenticação. Atualize a página; se persistir, verifique o console do navegador.';
+      }
+    }, 8000);
+  </script>
+  <script type="module" src="./app.js?v=20260916-2259"></script>
 </body>
 </html>
