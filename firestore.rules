@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function myEmail() {
+      return request.auth.token.email;
+    }
+
+    function myPerson() {
+      return get(/databases/$(database)/documents/people/$(myEmail())).data;
+    }
+
+    function activeUser() {
+      return signedIn() && exists(/databases/$(database)/documents/people/$(myEmail())) && myPerson().active == true;
+    }
+
+    function superAdmin() {
+      return activeUser() && myPerson().globalRole == 'super_admin';
+    }
+
+    function projectPermission(projectId, permission) {
+      return activeUser()
+        && myPerson().projects[projectId][permission] == true;
+    }
+
+    match /people/{email} {
+      allow read: if superAdmin() || (signedIn() && email == myEmail());
+      allow create, update, delete: if superAdmin();
+    }
+
+    match /projects/{projectId} {
+      allow get: if superAdmin() || projectPermission(projectId, 'view');
+      allow list: if superAdmin();
+      allow create, update, delete: if superAdmin();
+    }
+
+    match /audit/{auditId} {
+      allow read: if superAdmin();
+      allow create: if activeUser()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorEmail == myEmail();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
