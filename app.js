@@ -1,8 +1,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword,
-  sendPasswordResetEmail, signOut, setPersistence, browserLocalPersistence,
-  onAuthStateChanged
+  getAuth, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
+  setPersistence, browserLocalPersistence, onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
 import {
   getFirestore, doc, getDoc, getDocs, setDoc, deleteDoc, collection,
@@ -20,6 +19,7 @@ const PERMISSIONS = [
   ['import','Importar'], ['export','Exportar'], ['config','Configuração'],
   ['users','Usuários'], ['admin','Admin da obra']
 ];
+const IAM_ADMIN_ENDPOINT = 'https://membyrbgynicllzrhjsl.supabase.co/functions/v1/lps-iam-admin';
 const state = { authUser:null, person:null, projects:[], visibleProjects:[], people:[], auth:null, db:null };
 
 const normalizeEmail = value => String(value || '').trim().toLowerCase();
@@ -35,6 +35,20 @@ function can(projectId, permission='view'){
   return state.person?.active === true && state.person?.projects?.[projectId]?.[permission] === true;
 }
 function adminUI(){ document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden', !isSuper())); }
+
+async function iamAdmin(action,payload={}){
+  if(!state.authUser) throw new Error('Sessão administrativa ausente.');
+  const token=await state.authUser.getIdToken(false);
+  const response=await fetch(IAM_ADMIN_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
+    body:JSON.stringify({action,...payload}),
+    cache:'no-store'
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(data?.message||data?.error||'Falha no IAM central.');
+  return data;
+}
 
 async function currentPerson(user){
   if(!user?.email || !state.db) return null;
@@ -126,7 +140,9 @@ async function saveProject(event){
   const repo=$('projectRepo').value.trim(); const existing=state.projects.find(x=>x.id===original);
   const payload={name:$('projectName').value.trim(),category:$('projectCategory').value,repo,repoUrl:repo?`https://github.com/${repo}`:'',appUrl:$('projectUrl').value.trim(),active:$('projectActive').checked,visibility:existing?.visibility||'private',updatedAt:serverTimestamp(),updatedBy:normalizeEmail(state.authUser.email)};
   if(!original) payload.createdAt=serverTimestamp();
-  await setDoc(doc(state.db,'projects',id),payload,{merge:true}); await audit('project_saved',payload.name||id,id); $('projectDialog').close(); await loadProjects();
+  await setDoc(doc(state.db,'projects',id),payload,{merge:true});
+  await iamAdmin('sync_project',{project:{id,name:payload.name,category:payload.category,repo:payload.repo,appUrl:payload.appUrl,active:payload.active}});
+  await audit('project_saved',payload.name||id,id); $('projectDialog').close(); await loadProjects();
 }
 
 function permissionHtml(person=null){
@@ -141,6 +157,7 @@ function openPerson(email=null){
   const p=email?state.people.find(x=>x.id===email):null;
   $('personOriginal').value=p?.id||''; $('personName').value=p?.name||''; $('personEmail').value=p?.email||p?.id||''; $('personEmail').disabled=!!p;
   $('personCompany').value=p?.company||''; $('personRole').value=p?.globalRole||'viewer'; $('personActive').checked=p?.active!==false;
+  $('personPassword').value=''; $('personPassword').required=!p; $('personPasswordWrap').classList.toggle('hidden',!!p);
   $('permissionEditor').innerHTML=permissionHtml(p); $('personDialog').showModal();
 }
 
@@ -155,8 +172,22 @@ function collectPermissions(){
 async function savePerson(event){
   event.preventDefault(); if(!isSuper()) return;
   const original=$('personOriginal').value; const email=normalizeEmail($('personEmail').value); if(!email) return;
-  const payload={name:$('personName').value.trim(),email,company:$('personCompany').value.trim(),globalRole:$('personRole').value,active:$('personActive').checked,projects:collectPermissions(),updatedAt:serverTimestamp(),updatedBy:normalizeEmail(state.authUser.email)};
+  const permissions=collectPermissions();
+  const payload={name:$('personName').value.trim(),email,company:$('personCompany').value.trim(),globalRole:$('personRole').value,active:$('personActive').checked,projects:permissions,updatedAt:serverTimestamp(),updatedBy:normalizeEmail(state.authUser.email)};
   if(!original) payload.createdAt=serverTimestamp();
+  const grants=Object.entries(permissions).map(([projectId,perms])=>{
+    const p=state.projects.find(x=>x.id===projectId)||{};
+    return {projectId,projectName:p.name||projectId,category:p.category||'Projeto',repo:p.repo||'',appUrl:p.appUrl||'',role:payload.globalRole,permissions:perms,active:payload.active};
+  });
+  const iam=await iamAdmin(original?'upsert_person':'provision_user',{
+    person:{name:payload.name,email,company:payload.company,globalRole:payload.globalRole,active:payload.active},
+    password:$('personPassword').value,
+    grants
+  });
+  if(!original && Array.isArray(iam.provisionResults)){
+    const failures=iam.provisionResults.filter(x=>x.status==='error');
+    if(failures.length) throw new Error('Cadastro parcial. Falha de credencial em: '+failures.map(x=>x.projectId).join(', '));
+  }
   await setDoc(doc(state.db,'people',email),payload,{merge:true}); if(original&&original!==email) await deleteDoc(doc(state.db,'people',original));
   await audit('person_permissions_saved',email); $('personDialog').close(); await loadPeople();
 }
@@ -165,7 +196,12 @@ async function importSeed(){
   if(!isSuper()) return;
   const r=await fetch('./projects.seed.json',{cache:'no-store'}); if(!r.ok) throw new Error('projects.seed.json indisponível');
   const seed=await r.json(); let count=0;
-  for(const item of seed.projects||[]){ const ref=doc(state.db,'projects',item.id); const existing=await getDoc(ref); if(existing.exists()) continue; await setDoc(ref,{...item,createdAt:serverTimestamp(),updatedAt:serverTimestamp(),updatedBy:normalizeEmail(state.authUser.email)}); count++; }
+  for(const item of seed.projects||[]){
+    const ref=doc(state.db,'projects',item.id); const existing=await getDoc(ref); if(existing.exists()) continue;
+    await setDoc(ref,{...item,createdAt:serverTimestamp(),updatedAt:serverTimestamp(),updatedBy:normalizeEmail(state.authUser.email)});
+    await iamAdmin('sync_project',{project:{id:item.id,name:item.name||item.id,category:item.category||'Projeto',repo:item.repo||'',appUrl:item.appUrl||'',active:item.active!==false}});
+    count++;
+  }
   await audit('github_seed_imported',`${count} projetos importados`); await loadProjects(); alert(`${count} projeto(s) novo(s) importado(s).`);
 }
 
@@ -191,13 +227,12 @@ async function boot(user){
 }
 
 function wireUI(){
-  $('googleLogin')?.addEventListener('click',async()=>{ try{ setStatus('Validando...'); const provider=new GoogleAuthProvider(); provider.setCustomParameters({prompt:'select_account'}); await signInWithPopup(state.auth,provider); }catch(err){ setStatus(err?.message||'Falha no login.'); } });
   $('emailForm')?.addEventListener('submit',async e=>{ e.preventDefault(); try{ setStatus('Validando...'); await signInWithEmailAndPassword(state.auth,normalizeEmail($('email').value),$('password').value); }catch(err){ setStatus(err?.message||'Falha no login.'); } });
   $('resetPassword')?.addEventListener('click',async()=>{ const email=normalizeEmail($('email').value); if(!email){setStatus('Informe o e-mail primeiro.');return;} try{await sendPasswordResetEmail(state.auth,email);setStatus('E-mail de redefinição enviado.');}catch(err){setStatus(err?.message||'Falha ao enviar.');} });
   $('logout')?.addEventListener('click',()=>signOut(state.auth));
   $('blockedLogout')?.addEventListener('click',()=>signOut(state.auth));
-  $('newProject')?.addEventListener('click',()=>openProject()); $('projectForm')?.addEventListener('submit',saveProject); $('cancelProject')?.addEventListener('click',()=> $('projectDialog').close());
-  $('newPerson')?.addEventListener('click',()=>openPerson()); $('personForm')?.addEventListener('submit',savePerson); $('cancelPerson')?.addEventListener('click',()=> $('personDialog').close());
+  $('newProject')?.addEventListener('click',()=>openProject()); $('projectForm')?.addEventListener('submit',e=>saveProject(e).catch(err=>alert(err?.message||err))); $('cancelProject')?.addEventListener('click',()=> $('projectDialog').close());
+  $('newPerson')?.addEventListener('click',()=>openPerson()); $('personForm')?.addEventListener('submit',e=>savePerson(e).catch(err=>alert(err?.message||err))); $('cancelPerson')?.addEventListener('click',()=> $('personDialog').close());
   $('importSeed')?.addEventListener('click',async()=>{ try{await importSeed();}catch(err){alert(err?.message||err);} });
   document.querySelectorAll('.nav').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 }
@@ -208,11 +243,8 @@ async function start(){
     state.auth=getAuth(firebaseApp);
     state.db=getFirestore(firebaseApp);
     wireUI();
-    try{
-      await setPersistence(state.auth,browserLocalPersistence);
-    }catch(err){
-      console.warn('Persistência local indisponível; sessão continuará sem persistência explícita:',err?.code||err?.message||err);
-    }
+    try{ await setPersistence(state.auth,browserLocalPersistence); }
+    catch(err){ console.warn('Persistência local indisponível; sessão continuará sem persistência explícita:',err?.code||err?.message||err); }
     onAuthStateChanged(state.auth, user=>boot(user), err=>{
       console.error('Auth state error:',err);
       setBlocked(`Falha ao iniciar autenticação${err?.code?` (${err.code})`:''}.`);
