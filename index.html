@@ -15,12 +15,10 @@
       <div class="brand">LPS</div>
       <h1>Acesso restrito</h1>
       <p class="muted">Entre com uma conta previamente autorizada.</p>
-      <button id="googleLogin" class="btn primary">Entrar com Google</button>
-      <div class="divider">ou</div>
       <form id="emailForm">
         <label>E-mail<input id="email" type="email" autocomplete="username" required></label>
         <label>Senha<input id="password" type="password" autocomplete="current-password" required></label>
-        <button class="btn" type="submit">Entrar com e-mail</button>
+        <button class="btn primary" type="submit">Entrar</button>
       </form>
       <button id="resetPassword" class="link" type="button">Esqueci minha senha</button>
       <p id="loginStatus" class="status"></p>
@@ -58,7 +56,7 @@
       </section>
 
       <section id="view-people" class="view">
-        <div class="section-head"><div><h2>Pessoas e permissões</h2><p class="muted">Defina exatamente o que cada pessoa pode fazer em cada projeto.</p></div><button id="newPerson" class="btn primary">Cadastrar pessoa</button></div>
+        <div class="section-head"><div><h2>Pessoas e permissões</h2><p class="muted">Crie a credencial e defina exatamente o que cada pessoa pode fazer em cada projeto.</p></div><button id="newPerson" class="btn primary">Cadastrar pessoa</button></div>
         <div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>Perfil</th><th>Status</th><th></th></tr></thead><tbody id="peopleBody"></tbody></table></div>
       </section>
 
@@ -68,7 +66,7 @@
 
   <dialog id="projectDialog"><form id="projectForm" class="dialog-form"><h2>Projeto</h2><input id="projectOriginal" type="hidden"><label>Nome<input id="projectName" required></label><label>ID<input id="projectId" required placeholder="forno-panela"></label><label>Categoria<select id="projectCategory"><option>Painel de Bordo</option><option>Sistema</option><option>Aplicativo</option><option>Site</option><option>Ferramenta</option><option>Outro</option></select></label><label>Repositório<input id="projectRepo" placeholder="RICARDOPRF/repositorio"></label><label>URL publicada<input id="projectUrl" type="url" placeholder="https://..."></label><label class="inline"><input id="projectActive" type="checkbox" checked> Ativo</label><div class="actions"><button id="cancelProject" type="button" class="btn">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></dialog>
 
-  <dialog id="personDialog"><form id="personForm" class="dialog-form wide"><h2>Pessoa e permissões</h2><input id="personOriginal" type="hidden"><div class="two"><label>Nome<input id="personName" required></label><label>E-mail<input id="personEmail" type="email" required></label><label>Empresa<input id="personCompany"></label><label>Perfil<select id="personRole"><option value="viewer">Visualizador</option><option value="operator">Operador</option><option value="planner">Planejamento</option><option value="project_admin">Administrador de obra</option><option value="super_admin">Admin LPS</option></select></label></div><label class="inline"><input id="personActive" type="checkbox" checked> Usuário ativo</label><h3>Permissões por projeto</h3><div id="permissionEditor"></div><div class="actions"><button id="cancelPerson" type="button" class="btn">Cancelar</button><button class="btn primary" type="submit">Salvar permissões</button></div></form></dialog>
+  <dialog id="personDialog"><form id="personForm" class="dialog-form wide"><h2>Pessoa e permissões</h2><input id="personOriginal" type="hidden"><div class="two"><label>Nome<input id="personName" required></label><label>E-mail<input id="personEmail" type="email" required></label><label>Empresa<input id="personCompany"></label><label id="personPasswordWrap">Senha inicial<input id="personPassword" type="password" minlength="8" autocomplete="new-password" placeholder="mínimo 8 caracteres"></label><label>Perfil<select id="personRole"><option value="viewer">Visualizador</option><option value="operator">Operador</option><option value="planner">Planejamento</option><option value="project_admin">Administrador de obra</option><option value="super_admin">Admin LPS</option></select></label></div><label class="inline"><input id="personActive" type="checkbox" checked> Usuário ativo</label><h3>Permissões por projeto</h3><div id="permissionEditor"></div><div class="actions"><button id="cancelPerson" type="button" class="btn">Cancelar</button><button class="btn primary" type="submit">Salvar e provisionar</button></div></form></dialog>
 
   <script>
     window.setTimeout(() => {
@@ -78,6 +76,6 @@
       }
     }, 8000);
   </script>
-  <script type="module" src="./app.js?v=20260916-2259"></script>
+  <script type="module" src="./app.js?v=20260917-iam1"></script>
 </body>
 </html>
