@@ -51,6 +51,40 @@ jobs:
             exit 1
           }
 
+      - name: Require Firebase Hosting security headers
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const cfg=JSON.parse(fs.readFileSync('firebase.json','utf8'));
+          const rules=cfg?.hosting?.headers||[];
+          const all=rules.flatMap(r=>r.headers||[]);
+          const map=new Map(all.map(h=>[String(h.key).toLowerCase(),String(h.value)]));
+          const required=[
+            'content-security-policy',
+            'x-content-type-options',
+            'x-frame-options',
+            'referrer-policy',
+            'permissions-policy',
+            'strict-transport-security'
+          ];
+          for(const key of required){
+            if(!map.has(key)) throw new Error('Missing hosting security header: '+key);
+          }
+          const csp=map.get('content-security-policy')||'';
+          if(!csp.includes("frame-ancestors 'none'")) throw new Error('CSP must block framing with frame-ancestors');
+          if(/default-src\s+\*/.test(csp)) throw new Error('Wildcard default-src is not allowed');
+          console.log('Hosting security headers OK');
+          NODE
+
+      - name: Reject Firebase service-account secrets
+        shell: bash
+        run: |
+          if grep -RInE --exclude-dir=.git --exclude='security.yml' '"private_key"[[:space:]]*:' .; then
+            echo 'Firebase/Google service-account private key detected.'
+            exit 1
+          fi
+
       - name: Reject inline event handlers
         shell: bash
         run: |
