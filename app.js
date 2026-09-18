@@ -5,7 +5,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
 import {
   getFirestore, doc, getDoc, getDocs, setDoc, deleteDoc, collection,
-  addDoc, serverTimestamp, query, orderBy, limit
+  addDoc, serverTimestamp, query, orderBy, limit, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 import { initAppCheck } from './app-check.js';
@@ -21,7 +21,7 @@ const PERMISSIONS = [
   ['users','Usuários'], ['admin','Admin da obra']
 ];
 const IAM_ADMIN_ENDPOINT = 'https://membyrbgynicllzrhjsl.supabase.co/functions/v1/lps-iam-admin';
-const state = { authUser:null, person:null, projects:[], visibleProjects:[], people:[], auth:null, db:null };
+const state = { authUser:null, person:null, projects:[], visibleProjects:[], people:[], auth:null, db:null, personUnsubscribe:null };\nconst REVOCATION_REASON_KEY = 'lps.cc.revocation.reason';
 
 const normalizeEmail = value => String(value || '').trim().toLowerCase();
 const esc = value => String(value ?? '').replace(/[&<>'\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
@@ -55,6 +55,42 @@ async function currentPerson(user){
   if(!user?.email || !state.db) return null;
   const snap = await getDoc(doc(state.db,'people',normalizeEmail(user.email)));
   return snap.exists() ? {id:snap.id,...snap.data()} : null;
+}
+
+function stopPersonWatch(){
+  if(typeof state.personUnsubscribe==='function'){
+    try{state.personUnsubscribe();}catch{}
+  }
+  state.personUnsubscribe=null;
+}
+
+async function revokeLocalSession(reason){
+  stopPersonWatch();
+  try{sessionStorage.setItem(REVOCATION_REASON_KEY,String(reason||'Sua sessão foi revogada.'));}catch{}
+  try{await signOut(state.auth);}catch{}
+}
+
+function startPersonWatch(user){
+  stopPersonWatch();
+  if(!user?.email || !state.db) return;
+  const email=normalizeEmail(user.email);
+  state.personUnsubscribe=onSnapshot(doc(state.db,'people',email),snap=>{
+    const person=snap.exists()?{id:snap.id,...snap.data()}:null;
+    if(!person || person.active!==true){
+      revokeLocalSession('Seu acesso ao LPS Control Center foi revogado. Entre novamente somente após nova liberação.');
+      return;
+    }
+    const roleChanged=state.person?.globalRole!==person.globalRole;
+    const permissionsChanged=JSON.stringify(state.person?.projects||{})!==JSON.stringify(person.projects||{});
+    state.person=person;
+    adminUI();
+    renderUser();
+    if(!isSuper() && (document.querySelector('#view-people.active')||document.querySelector('#view-audit.active'))) switchView('dashboard');
+    if(roleChanged||permissionsChanged) loadProjects().catch(err=>console.warn('Atualização de permissões:',err?.message||err));
+  },error=>{
+    console.warn('Monitor de autorização em tempo real:',error?.code||error?.message||error);
+    revokeLocalSession('Não foi possível revalidar sua autorização. A sessão foi encerrada por segurança.');
+  });
 }
 
 async function audit(action, details='', projectId=null){
@@ -216,11 +252,20 @@ function switchView(name){
 
 async function boot(user){
   state.authUser=user;
-  if(!user){ state.person=null; showOnly('login'); return; }
+  if(!user){
+    stopPersonWatch();
+    state.person=null;
+    showOnly('login');
+    try{
+      const reason=sessionStorage.getItem(REVOCATION_REASON_KEY);
+      if(reason){setStatus(reason);sessionStorage.removeItem(REVOCATION_REASON_KEY);}
+    }catch{}
+    return;
+  }
   try{
     const person=await currentPerson(user); state.person=person;
     if(!person||person.active!==true){ setBlocked(`A conta ${user.email||''} ainda não foi autorizada no LPS Control Center.`); return; }
-    adminUI(); renderUser(); await loadProjects(); showOnly('app'); await audit('login','Acesso autenticado ao Control Center');
+    adminUI(); renderUser(); await loadProjects(); showOnly('app'); startPersonWatch(user); await audit('login','Acesso autenticado ao Control Center');
   }catch(err){
     console.error('Falha ao validar permissões:',err);
     setBlocked(`Não foi possível validar suas permissões. ${err?.code ? `Código: ${err.code}. ` : ''}Verifique se o Firestore foi criado e se as regras foram publicadas.`);
