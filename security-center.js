@@ -103,7 +103,7 @@ function activateSecurityView(){
 function activity(){lastActivity=Date.now();}
 function startSessionProtection(){
   ['pointerdown','keydown','touchstart','scroll'].forEach(name=>window.addEventListener(name,activity,{passive:true}));
-  clearInterval(idleTimer); clearInterval(sessionTimer);
+  clearInterval(idleTimer); clearInterval(sessionTimer); clearInterval(deviceWatchTimer);
   idleTimer=setInterval(async()=>{
     if(currentUser && Date.now()-lastActivity>IDLE_MS){
       await securityApi('security_event',{event:'session_timeout',note:'20 minutos de inatividade'}).catch(()=>{});
@@ -118,6 +118,16 @@ function startSessionProtection(){
       await signOut(auth).catch(()=>{});
     }
   },60000);
+
+  deviceWatchTimer=setInterval(async()=>{
+    if(!currentUser) return;
+    await registerCurrentDevice().catch(err=>console.warn('[LPS Security] revalidação de dispositivo:',err?.message||err));
+  },60000);
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible'&&currentUser){
+      registerCurrentDevice().catch(err=>console.warn('[LPS Security] revalidação ao retornar:',err?.message||err));
+    }
+  });
 }
 
 function getLoginGuard(){
@@ -299,7 +309,7 @@ async function init(){
   installSecureLoginHandlers(); startSessionProtection();
   onAuthStateChanged(auth,async user=>{
     currentUser=user; currentPerson=null; sessionLoginLogged=false;
-    if(!user){show('securityNav',false);return;}
+    if(!user){show('securityNav',false);clearInterval(deviceWatchTimer);return;}
     try{
       currentPerson=await loadPerson(user);
       if(!currentPerson?.active) return;

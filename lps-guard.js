@@ -8,7 +8,8 @@ import {
 import {
   getFirestore,
   doc,
-  getDoc
+  getDoc,
+  onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 
@@ -62,15 +63,31 @@ function buildControlCenterUrl(projectId, permission = 'view') {
 function renderDenied({ title, message, projectId, permission }) {
   endValidation();
   document.querySelector('.lps-guard-screen')?.remove();
+
   const screen = document.createElement('div');
   screen.className = 'lps-guard-screen';
-  screen.innerHTML = `
-    <section class="lps-guard-card" role="alert" aria-live="assertive">
-      <div class="lps-guard-brand">LEAN PERFORMANCE SOLUTIONS</div>
-      <h1>${title}</h1>
-      <p>${message}</p>
-      <a href="${buildControlCenterUrl(projectId, permission)}">Abrir LPS Control Center</a>
-    </section>`;
+
+  const card = document.createElement('section');
+  card.className = 'lps-guard-card';
+  card.setAttribute('role', 'alert');
+  card.setAttribute('aria-live', 'assertive');
+
+  const brand = document.createElement('div');
+  brand.className = 'lps-guard-brand';
+  brand.textContent = 'LEAN PERFORMANCE SOLUTIONS';
+
+  const heading = document.createElement('h1');
+  heading.textContent = String(title || 'Acesso bloqueado');
+
+  const paragraph = document.createElement('p');
+  paragraph.textContent = String(message || 'Seu acesso não pôde ser validado.');
+
+  const link = document.createElement('a');
+  link.href = buildControlCenterUrl(projectId, permission);
+  link.textContent = 'Abrir LPS Control Center';
+
+  card.append(brand, heading, paragraph, link);
+  screen.appendChild(card);
   document.body.appendChild(screen);
 }
 
@@ -93,11 +110,70 @@ function permissionGranted(person, projectId, permission) {
   return person?.projects?.[projectId]?.[permission] === true;
 }
 
+function startLiveAccessWatch(db, { email, user, projectId, permission }) {
+  let revoked = false;
+  let personState = null;
+  let projectState = null;
+
+  const revoke = (reason, title, message) => {
+    if (revoked) return;
+    revoked = true;
+    renderDenied({ title, message, projectId, permission });
+    window.dispatchEvent(new CustomEvent('lps:access-revoked', {
+      detail: { reason, user, person: personState, project: projectState, projectId, permission }
+    }));
+  };
+
+  const stopPerson = onSnapshot(doc(db, 'people', email), snap => {
+    personState = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    if (!permissionGranted(personState, projectId, permission)) {
+      revoke(
+        'permission_revoked',
+        'Acesso revogado',
+        'Sua conta foi bloqueada ou sua permissão para este projeto foi removida. O acesso a esta tela foi encerrado.'
+      );
+    }
+  }, error => {
+    console.warn('LPS Guard: monitor de pessoa indisponível.', error?.code || error?.message || error);
+    revoke(
+      'person_watch_failed',
+      'Acesso não pôde ser revalidado',
+      'A validação contínua da sua conta falhou. Por segurança, esta tela foi bloqueada.'
+    );
+  });
+
+  const stopProject = onSnapshot(doc(db, 'projects', projectId), snap => {
+    projectState = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    if (!projectState || projectState.active === false) {
+      revoke(
+        'project_inactive',
+        'Projeto indisponível',
+        'Este projeto foi desativado no LPS Control Center. O acesso a esta tela foi encerrado.'
+      );
+    }
+  }, error => {
+    console.warn('LPS Guard: monitor de projeto indisponível.', error?.code || error?.message || error);
+    revoke(
+      'project_watch_failed',
+      'Projeto não pôde ser revalidado',
+      'A validação contínua do projeto falhou. Por segurança, esta tela foi bloqueada.'
+    );
+  });
+
+  const stop = () => {
+    try { stopPerson(); } catch {}
+    try { stopProject(); } catch {}
+  };
+  window.addEventListener('pagehide', stop, { once: true });
+  return stop;
+}
+
 export async function requireProjectAccess(projectId, options = {}) {
   if (!projectId) throw new Error('LPS Guard: projectId é obrigatório.');
 
   const permission = options.permission || 'view';
   const redirectUnauthenticated = options.redirectUnauthenticated !== false;
+  const liveRevocation = options.liveRevocation !== false;
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
@@ -150,11 +226,15 @@ export async function requireProjectAccess(projectId, options = {}) {
       return { allowed: false, reason: 'project_inactive', user, person, project };
     }
 
+    const stopWatching = liveRevocation
+      ? startLiveAccessWatch(db, { email, user, projectId, permission })
+      : () => {};
+
     endValidation();
     window.dispatchEvent(new CustomEvent('lps:access-granted', {
-      detail: { user, person, project, projectId, permission }
+      detail: { user, person, project, projectId, permission, liveRevocation }
     }));
-    return { allowed: true, user, person, project };
+    return { allowed: true, user, person, project, stopWatching };
   } catch (error) {
     console.error('LPS Guard:', error);
     renderDenied({
