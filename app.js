@@ -8,6 +8,7 @@ import {
   addDoc, serverTimestamp, query, orderBy, limit
 } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
+import { initAppCheck } from './app-check.js';
 
 const $ = id => document.getElementById(id);
 const ROLE_LABEL = {
@@ -240,6 +241,7 @@ function wireUI(){
 async function start(){
   try{
     const firebaseApp=initializeApp(firebaseConfig);
+    await initAppCheck(firebaseApp);
     state.auth=getAuth(firebaseApp);
     state.db=getFirestore(firebaseApp);
     wireUI();
