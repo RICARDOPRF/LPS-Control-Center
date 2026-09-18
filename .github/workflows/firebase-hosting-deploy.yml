@@ -1,0 +1,39 @@
+name: Deploy Firebase Hosting
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_id:
+        description: 'Firebase Hosting channel (use live for production)'
+        required: true
+        default: 'security-preview'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Firebase Hosting
+    runs-on: ubuntu-latest
+    environment: firebase-hosting
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate requested channel
+        shell: bash
+        run: |
+          CHANNEL="${{ inputs.channel_id }}"
+          if [[ ! "$CHANNEL" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "Invalid Firebase Hosting channel id."
+            exit 1
+          fi
+
+      - name: Deploy
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_LPS_CONTROL_CENTER }}'
+          projectId: lps-control-center
+          channelId: '${{ inputs.channel_id }}'
