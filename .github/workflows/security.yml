@@ -1,0 +1,60 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+
+  static-security-checks:
+    name: Static security checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reject committed private keys
+        shell: bash
+        run: |
+          if grep -RInE --exclude-dir=.git --exclude='security.yml' 'BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY' .; then
+            echo 'Private key material detected.'
+            exit 1
+          fi
+
+      - name: Require CSP on Control Center
+        shell: bash
+        run: |
+          grep -q 'Content-Security-Policy' index.html || {
+            echo 'CSP missing from index.html'
+            exit 1
+          }
+
+      - name: Reject inline event handlers
+        shell: bash
+        run: |
+          if grep -RInE --include='*.html' ' on[a-zA-Z]+=' .; then
+            echo 'Inline event handler detected. Use addEventListener instead.'
+            exit 1
+          fi
