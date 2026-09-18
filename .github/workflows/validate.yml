@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: '22'
       - name: Check JavaScript syntax
-        run: node --check app.js && node --check firebase-config.js
+        run: node --check app.js && node --check firebase-config.js && node --check app-check.js && node --check app-check-config.js
       - name: Validate JSON
         run: node -e "JSON.parse(require('fs').readFileSync('projects.seed.json','utf8')); JSON.parse(require('fs').readFileSync('firebase.json','utf8')); console.log('JSON OK')"
       - name: Check required files
